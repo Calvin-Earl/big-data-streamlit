@@ -6,7 +6,7 @@ This is a template for students to build a real-time streaming data dashboard.
 Students will need to implement the actual data processing, Kafka consumption,
 and storage integration.
 
-DO NOT MODIFY THE TEMPLATE STRUCTURE - IMPLEMENT THE TODO SECTIONS
+IMPLEMENT THE TODO SECTIONS
 """
 
 import streamlit as st
@@ -17,6 +17,7 @@ import json
 from datetime import datetime, timedelta
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError, NoBrokersAvailable
+from streamlit_autorefresh import st_autorefresh
 
 # Page configuration
 st.set_page_config(
@@ -93,17 +94,28 @@ def consume_kafka_data(config):
     # Cache Kafka consumer to avoid recreation
     cache_key = f"kafka_consumer_{kafka_broker}_{kafka_topic}"
     if cache_key not in st.session_state:
-        try:
-            st.session_state[cache_key] = KafkaConsumer(
-                kafka_topic,
-                bootstrap_servers=[kafka_broker],
-                auto_offset_reset='latest',
-                enable_auto_commit=True,
-                value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-                consumer_timeout_ms=5000
-            )
-        except Exception:
-            st.session_state[cache_key] = None
+        # Connection retry logic for Kafka consumer
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                st.session_state[cache_key] = KafkaConsumer(
+                    kafka_topic,
+                    bootstrap_servers=[kafka_broker],
+                    auto_offset_reset='latest',
+                    enable_auto_commit=True,
+                    value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+                    consumer_timeout_ms=5000
+                )
+                break  # Success, break out of retry loop
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    st.warning(f"Kafka connection attempt {attempt + 1} failed: {e}. Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    st.error(f"Failed to connect to Kafka after {max_retries} attempts: {e}")
+                    st.session_state[cache_key] = None
     
     consumer = st.session_state[cache_key]
     
@@ -122,12 +134,22 @@ def consume_kafka_data(config):
                         try:
                             data = message.value
                             if all(key in data for key in ['timestamp', 'value', 'metric_type', 'sensor_id']):
-                                messages.append({
-                                    'timestamp': datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00')),
-                                    'value': float(data['value']),
-                                    'metric_type': data['metric_type'],
-                                    'sensor_id': data['sensor_id']
-                                })
+                                # Robust timestamp parsing for various ISO 8601 formats
+                                timestamp_str = data['timestamp']
+                                try:
+                                    # Handle common ISO 8601 formats including Zulu time
+                                    if timestamp_str.endswith('Z'):
+                                        timestamp_str = timestamp_str[:-1] + '+00:00'
+                                    # Parse the timestamp
+                                    timestamp = datetime.fromisoformat(timestamp_str)
+                                    messages.append({
+                                        'timestamp': timestamp,
+                                        'value': float(data['value']),
+                                        'metric_type': data['metric_type'],
+                                        'sensor_id': data['sensor_id']
+                                    })
+                                except ValueError as ve:
+                                    st.warning(f"Invalid timestamp format '{timestamp_str}': {ve}")
                             else:
                                 st.warning(f"Invalid message format: {data}")
                         except (ValueError, KeyError, TypeError) as e:
@@ -170,7 +192,7 @@ def query_historical_data(time_range="1h", metrics=None):
     return generate_sample_data()
 
 
-def display_real_time_view(config):
+def display_real_time_view(config, refresh_interval):
     """
     Page 1: Real-time Streaming View
     STUDENT TODO: Implement real-time data visualization from Kafka
@@ -179,7 +201,7 @@ def display_real_time_view(config):
     
     # Refresh status
     refresh_state = st.session_state.refresh_state
-    st.info(f"**Auto-refresh:** {'🟢 Enabled' if refresh_state['auto_refresh'] else '🔴 Disabled'} - Updates every 5 seconds")
+    st.info(f"**Auto-refresh:** {'🟢 Enabled' if refresh_state['auto_refresh'] else '🔴 Disabled'} - Updates every {refresh_interval} seconds")
     
     # Loading indicator for data consumption
     with st.spinner("Fetching real-time data from Kafka..."):
@@ -195,7 +217,7 @@ def display_real_time_view(config):
         # Real-time data metrics
         st.subheader("📊 Live Data Metrics")
         if not real_time_data.empty:
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3 = st.columns(3)
             
             with col1:
                 st.metric("Records Received", len(real_time_data))
@@ -203,8 +225,6 @@ def display_real_time_view(config):
                 st.metric("Latest Value", f"{real_time_data['value'].iloc[-1]:.2f}")
             with col3:
                 st.metric("Data Range", f"{real_time_data['timestamp'].min().strftime('%H:%M')} - {real_time_data['timestamp'].max().strftime('%H:%M')}")
-            with col4:
-                st.metric("Refresh Count", refresh_state['refresh_count'])
         
         # Real-time chart
         st.subheader("📈 Real-time Trend")
@@ -344,7 +364,6 @@ def main():
     if 'refresh_state' not in st.session_state:
         st.session_state.refresh_state = {
             'last_refresh': datetime.now(),
-            'refresh_count': 0,
             'auto_refresh': True
         }
     
@@ -362,25 +381,18 @@ def main():
     if st.session_state.refresh_state['auto_refresh']:
         refresh_interval = st.sidebar.slider(
             "Refresh Interval (seconds)",
-            min_value=2,
-            max_value=10,
-            value=5,
+            min_value=5,
+            max_value=60,
+            value=15,
             help="Set how often real-time data refreshes"
         )
         
-        # Check if it's time to refresh
-        current_time = datetime.now()
-        time_since_refresh = (current_time - st.session_state.refresh_state['last_refresh']).total_seconds()
-        
-        if time_since_refresh >= refresh_interval:
-            st.session_state.refresh_state['last_refresh'] = current_time
-            st.session_state.refresh_state['refresh_count'] += 1
-            st.rerun()
+        # Auto-refresh using streamlit-autorefresh package
+        st_autorefresh(interval=refresh_interval * 1000, key="auto_refresh")
     
     # Manual refresh button
     if st.sidebar.button("🔄 Manual Refresh"):
         st.session_state.refresh_state['last_refresh'] = datetime.now()
-        st.session_state.refresh_state['refresh_count'] += 1
         st.rerun()
     
     # Display refresh status
@@ -391,7 +403,7 @@ def main():
     tab1, tab2 = st.tabs(["📈 Real-time Streaming", "📊 Historical Data"])
     
     with tab1:
-        display_real_time_view(config)
+        display_real_time_view(config, refresh_interval)
     
     with tab2:
         display_historical_view(config)

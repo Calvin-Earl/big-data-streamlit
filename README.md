@@ -85,7 +85,7 @@ MONGO_DB=streaming_data
 
 ### Execution Sequence
 
-1. **Start Kafka**
+1. **Start Kafka** (important)
 2. **Run Data Producer**
 3. **Launch Dashboard**
 

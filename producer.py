@@ -268,7 +268,7 @@ class StreamingDataProducer:
                     if message_count % 10 == 0:  # Print progress every 10 messages
                         print(f"Sent {message_count} messages...")
                 
-                # Calculate sleep time to maintain desired message rate (5-second intervals)
+                # Calculate sleep time to maintain desired message rate
                 sleep_time = 1.0 / messages_per_second
                 time.sleep(sleep_time)
                 
@@ -372,9 +372,5 @@ def main():
 
 
 # STUDENT TODO: Testing Instructions
-if __name__ == "__main__":
-    main()
-
-
 if __name__ == "__main__":
     main()
