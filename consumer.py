@@ -7,7 +7,7 @@ from kafka import KafkaConsumer
 # -------------------------
 KAFKA_BROKER = 'localhost:9092'        
 TOPIC = 'weather_topic'                
-MONGO_URI = 'mongodb+srv://qeresanjuan:nosdeyar@cluster0.sgf8rsf.mongodb.net/?appName=Cluster0'  # MongoDB URI
+MONGO_URI = 'mongodb+srv://qcelplanta:123123123@groceryinventorysystem.tim3uxe.mongodb.net/?appName=GroceryInventorySystem'  # MongoDB URI
 DB_NAME = 'weather_db'                 
 COLLECTION_NAME = 'weather_data'      
 
